@@ -2,96 +2,88 @@ import streamlit as st
 from google import genai
 import datetime
 
-# 1. 页面配置与标题
-st.set_page_config(page_title="AI 咨询合伙人-稳健版", page_icon="🤝", layout="wide")
+# 1. 页面配置
+st.set_page_config(page_title="AI 提问工作站", page_icon="🛠️", layout="wide")
 
-# 2. 初始化状态 (增加对表单内容的缓存)
-if 'chat_log' not in st.session_state:
-    st.session_state.chat_log = []
-if 'usage_count' not in st.session_state:
-    st.session_state.usage_count = 0
+# 2. 初始化状态
+if 'chat_log' not in st.session_state: st.session_state.chat_log = []
+if 'usage_count' not in st.session_state: st.session_state.usage_count = 0
 
 # --- 侧边栏 ---
 with st.sidebar:
-    st.title("⚙️ 控制面板")
+    st.title("⚙️ 配置中心")
     api_key = st.text_input("Gemini API Key", type="password")
     model_name = st.selectbox("选择模型", ["gemini-2.0-flash", "gemini-2.5-pro"])
-    
     st.divider()
-    if st.button("🗑️ 清空对话并重置"):
+    st.metric("已消耗请求", st.session_state.usage_count)
+    if st.button("🗑️ 清空所有记录"):
         st.session_state.chat_log = []
         st.session_state.usage_count = 0
         st.rerun()
-    
-    # 导出功能（防止网络断开导致记录丢失，随时可以导出）
-    if st.session_state.chat_log:
-        st.divider()
-        full_text = f"# AI 咨询记录\n生成时间: {datetime.datetime.now()}\n\n"
-        for msg in st.session_state.chat_log:
-            role = "用户" if msg["role"] == "user" else "AI 专家"
-            full_text += f"### {role}:\n{msg['content']}\n\n"
-        
-        st.download_button(
-            label="📥 导出当前对话防止丢失",
-            data=full_text,
-            file_name=f"Consulting_Log_{datetime.date.today()}.md",
-            mime="text/markdown"
-        )
 
-# --- 主界面 ---
-st.title("🤝 拉式思维：AI 咨询合伙人")
+# --- 主界面：模块化标签页 ---
+tab1, tab2 = st.tabs(["🤝 拉式诊断模式", "🏭 提示词工厂"])
 
-# 初始表单部分 - 使用 key 参数确保内容在页面刷新时能保留在缓存里
-if not st.session_state.chat_log:
-    with st.expander("📝 第一步：填写背景信息开始咨询", expanded=True):
-        f1, f2 = st.columns(2)
-        field = f1.text_input("专业领域", value="副业转型", key="field_input")
-        goal = f2.text_input("最终目标", value="寻找适合的副业项目", key="goal_input")
-        status = st.text_area("现状描述", placeholder="例如：36岁，白天上班...", key="status_input")
-        limits = st.text_area("限制条件", placeholder="例如：不露脸...", key="limits_input")
-        
-        if st.button("🎯 确认发送并开始诊断"):
-            if not api_key:
-                st.error("❌ 错误：请在左侧侧边栏填入 API Key！")
-            elif not status:
-                st.warning("⚠️ 请先填写现状描述。")
-            else:
-                initial_prompt = f"【初始背景】\n领域：{field}\n目标：{goal}\n现状：{status}\n限制：{limits}"
-                st.session_state.chat_log.append({"role": "user", "content": initial_prompt})
-                st.session_state.needs_reply = True
-                st.rerun()
+# --- 模块一：拉式诊断模式 ---
+with tab1:
+    st.subheader("拉式提问：压榨 AI 的专业潜力")
+    if not st.session_state.chat_log:
+        with st.form("init_form"):
+            f1, f2 = st.columns(2)
+            field = f1.text_input("专业领域", value="副业转型")
+            goal = f2.text_input("最终目标", value="寻找适合的副业项目")
+            status = st.text_area("现状描述", placeholder="描述你的资源、背景...")
+            limits = st.text_area("限制条件", placeholder="预算、时间、隐私要求...")
+            if st.form_submit_button("🎯 开始诊断"):
+                if api_key:
+                    prompt = f"领域：{field}\n目标：{goal}\n现状：{status}\n限制：{limits}"
+                    st.session_state.chat_log.append({"role": "user", "content": prompt})
+                    st.session_state.needs_reply = True
+                    st.rerun()
+                else: st.error("请填入 Key")
 
-# 展示聊天流
-for message in st.session_state.chat_log:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    # 对话流展示与后续回复
+    for msg in st.session_state.chat_log:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-# 处理 AI 回复逻辑 (带错误捕获)
-if 'needs_reply' in st.session_state and st.session_state.needs_reply:
-    try:
-        client = genai.Client(api_key=api_key)
-        sys_instruction = "你是一个‘拉式提问’专家。请分析用户现状盲点并提出深度问题（每次不超3个）。只有当用户明确要求方案时才给出最终结论。"
-        
-        with st.spinner("⏳ 正在连接 AI 服务器，请稍候..."):
-            # 获取最后一条用户消息
-            response = client.models.generate_content(
-                model=model_name,
-                contents=st.session_state.chat_log[-1]["content"],
-                config={"system_instruction": sys_instruction}
-            )
-            st.session_state.chat_log.append({"role": "assistant", "content": response.text})
+    if st.session_state.get('needs_reply'):
+        try:
+            client = genai.Client(api_key=api_key)
+            res = client.models.generate_content(model=model_name, contents=st.session_state.chat_log[-1]["content"], 
+                  config={"system_instruction": "你是一个拉式提问专家，负责通过追问挖掘盲点。"})
+            st.session_state.chat_log.append({"role": "assistant", "content": res.text})
             st.session_state.usage_count += 1
             del st.session_state.needs_reply
             st.rerun()
-    except Exception as e:
-        # 如果报错，把刚才存进去的用户消息弹出，让用户可以重新尝试
-        st.session_state.chat_log.pop() 
-        del st.session_state.needs_reply
-        st.error(f"🌐 网络连接超时或 API 错误：{str(e)}。请检查网络后重试。")
+        except Exception as e: st.error(f"连接失败: {e}")
 
-# 后续对话输入
-if st.session_state.chat_log and "needs_reply" not in st.session_state:
-    if user_input := st.chat_input("在此输入你的回答..."):
-        st.session_state.chat_log.append({"role": "user", "content": user_input})
-        st.session_state.needs_reply = True
-        st.rerun()
+    if st.session_state.chat_log and not st.session_state.get('needs_reply'):
+        if u_input := st.chat_input("继续回答问题或进行追问..."):
+            st.session_state.chat_log.append({"role": "user", "content": u_input})
+            st.session_state.needs_reply = True
+            st.rerun()
+
+# --- 模块二：提示词工厂 ---
+with tab2:
+    st.subheader("通用提示词生成器")
+    st.info("基于『角色-任务-要求-范式』框架生成高质量 Prompt")
+    
+    with st.container(border=True):
+        role_p = st.text_input("1. AI 扮演什么角色？", placeholder="例如：资深文案策划、代码审计专家")
+        task_p = st.text_area("2. 要执行什么任务？", placeholder="例如：将这份技术文档转换成通俗易懂的科普推文")
+        rule_p = st.text_area("3. 有哪些具体要求？", placeholder="例如：语言幽默、不超过500字、必须包含3个案例")
+        format_p = st.selectbox("4. 输出格式", ["Markdown 表格", "分点列表", "专业报告", "代码块", "JSON"])
+        
+        if st.button("🪄 生成结构化提示词"):
+            final_prompt = f"""# Role: {role_p}
+## Task: {task_p}
+## Rules: 
+{rule_p}
+## Output Format:
+请使用 {format_p} 格式输出结果。
+
+---
+请在开始前确认是否理解以上指令。"""
+            st.success("生成的提示词如下：")
+            st.code(final_prompt, language="markdown")
+            st.button("📋 确认并复制（手动复制上方代码块）")
